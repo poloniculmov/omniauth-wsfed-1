@@ -56,8 +56,8 @@ module OmniAuth
 
             # check cert matches registered idp cert
             fingerprint = Digest::SHA1.hexdigest(cert.to_der)
-
-            if fingerprint != idp_cert_fingerprint.gsub(/[^a-zA-Z0-9]/,"").downcase
+            idp_fingerprint = get_fingerprint || idp_cert_fingerprint
+            if fingerprint != idp_fingerprint.gsub(/[^a-zA-Z0-9]/,"").downcase
               return soft ? false : (raise OmniAuth::Strategies::WSFed::ValidationError.new("Fingerprint mismatch"))
             end
 
@@ -122,6 +122,22 @@ module OmniAuth
           end
 
         private
+
+          def get_fingerprint
+            uri = URI settings[:federation_url]
+
+            request = Net::HTTP.get_response(uri)
+
+            xml_string = request.body
+
+            document = REXML::Document.new xml_string
+
+            base64_cert = document.elements["//X509Certificate"].text
+            cert_text   = Base64.decode64(base64_cert)
+            cert        = OpenSSL::X509::Certificate.new(cert_text)
+
+            Digest::SHA1.hexdigest(cert.to_der)
+          end
 
           def digests_match?(hash, digest_value)
             hash == digest_value
