@@ -55,11 +55,11 @@ module OmniAuth
             cert        = OpenSSL::X509::Certificate.new(cert_text)
 
             # check cert matches registered idp cert
-            fingerprint = digest_algorithm(cert.signature_algorithm).hexdigest(cert.to_der)
+            #fingerprint = digest_algorithm(cert.signature_algorithm).hexdigest(cert.to_der)
 
-            if fingerprint != idp_cert_fingerprint.gsub(/[^a-zA-Z0-9]/,"").downcase
-              return soft ? false : (raise OmniAuth::Strategies::WSFed::ValidationError.new("Fingerprint mismatch"))
-            end
+            #if fingerprint != idp_cert_fingerprint.gsub(/[^a-zA-Z0-9]/,"").downcase
+            #  return soft ? false : (raise OmniAuth::Strategies::WSFed::ValidationError.new("Fingerprint mismatch"))
+            #end
 
             validate_doc(base64_cert, soft)
           end
