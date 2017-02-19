@@ -50,21 +50,18 @@ module OmniAuth
 
           def validate(idp_cert_fingerprint, soft = true)
             # get cert from response
-            cert_element = self.elements["//ds:X509Certificate"] || self.elements["//X509Certificate"]
-            base64_cert = cert_element.text
+            base64_cert = REXML::XPath.first(self, "//ds:X509Certificate", {"ds"=>DSIG}).text
             cert_text   = Base64.decode64(base64_cert)
             cert        = OpenSSL::X509::Certificate.new(cert_text)
 
             # check cert matches registered idp cert
-            fingerprint = Digest::SHA1.hexdigest(cert.to_der)
-            puts fingerprint.inspect
-            idp_fingerprint = get_fingerprint || idp_cert_fingerprint
-            #if fingerprint != idp_fingerprint.gsub(/[^a-zA-Z0-9]/,"").downcase
-            #  return soft ? false : (raise OmniAuth::Strategies::WSFed::ValidationError.new("Fingerprint mismatch"))
-            #end
+            fingerprint = digest_algorithm(cert.signature_algorithm).hexdigest(cert.to_der)
 
-            return true
-            #validate_doc(base64_cert, soft)
+            if fingerprint != idp_cert_fingerprint.gsub(/[^a-zA-Z0-9]/,"").downcase
+              return soft ? false : (raise OmniAuth::Strategies::WSFed::ValidationError.new("Fingerprint mismatch"))
+            end
+
+            validate_doc(base64_cert, soft)
           end
 
           def validate_doc(base64_cert, soft = true)
@@ -81,7 +78,7 @@ module OmniAuth
             end
 
             # remove signature node
-            sig_element = REXML::XPath.first(self, "//ds:Signature", {"ds"=>DSIG}) || REXML::XPath.first(self, "//Signature")
+            sig_element = REXML::XPath.first(self, "//ds:Signature", {"ds"=>DSIG})
             sig_element.remove
 
             # check digests
@@ -93,9 +90,9 @@ module OmniAuth
               canoner                       = XML::Util::XmlCanonicalizer.new(false, true)
               canoner.inclusive_namespaces  = inclusive_namespaces if canoner.respond_to?(:inclusive_namespaces) && !inclusive_namespaces.empty?
               canon_hashed_element          = canoner.canonicalize(hashed_element)
-	            digest_algorithm              = algorithm(REXML::XPath.first(ref, "//ds:DigestMethod"))
+              digest_algorithm              = algorithm(REXML::XPath.first(ref, "//ds:DigestMethod", {"ds"=>DSIG}))
               hash                          = Base64.encode64(digest_algorithm.digest(canon_hashed_element)).chomp
-              digest_value                  = REXML::XPath.first(ref, "//ds:DigestValue", {"ds"=>"http://www.w3.org/2000/09/xmldsig#"}).text
+              digest_value                  = REXML::XPath.first(ref, "//ds:DigestValue", {"ds"=>DSIG}).text
 
               unless digests_match?(hash, digest_value)
                 return soft ? false : (raise OmniAuth::Strategies::WSFed::ValidationError.new("Digest mismatch"))
@@ -103,8 +100,10 @@ module OmniAuth
             end
 
             # verify signature
-            canoner                 = XML::Util::XmlCanonicalizer.new(false, true)
             signed_info_element     = REXML::XPath.first(sig_element, "//ds:SignedInfo", {"ds"=>DSIG})
+            signed_info_element.attributes['xmlns'] = DSIG
+
+            canoner                 = XML::Util::XmlCanonicalizer.new(false, true)
             canon_string            = canoner.canonicalize(signed_info_element)
 
             base64_signature        = REXML::XPath.first(sig_element, "//ds:SignatureValue", {"ds"=>DSIG}).text
@@ -126,22 +125,6 @@ module OmniAuth
 
         private
 
-          def get_fingerprint
-            uri = URI settings[:federation_url]
-
-            request = Net::HTTP.get_response(uri)
-
-            xml_string = request.body
-
-            document = REXML::Document.new xml_string
-
-            base64_cert = document.elements["//X509Certificate"].text
-            cert_text   = Base64.decode64(base64_cert)
-            cert        = OpenSSL::X509::Certificate.new(cert_text)
-
-            Digest::SHA1.hexdigest(cert.to_der)
-          end
-
           def digests_match?(hash, digest_value)
             hash == digest_value
           end
@@ -153,6 +136,10 @@ module OmniAuth
 
           def algorithm(element)
             algorithm = element.attribute("Algorithm").value if element
+            digest_algorithm(algorithm)
+          end
+
+          def digest_algorithm(algorithm)
             algorithm = algorithm && algorithm =~ /sha(.*?)$/i && $1.to_i
             case algorithm
             when 256 then OpenSSL::Digest::SHA256
